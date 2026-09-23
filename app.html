@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RenewCue - expired documents never surprise you again</title>
+<style>
+  :root { --ink:#1c2b26; --muted:#6b7a73; --accent:#2f6f5e; --accent-dk:#265c4e; --card:#ffffff; --bg:#f4f6f3; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:680px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:28px; margin:0 0 6px; }
+  .tag { color:var(--muted); margin:0 0 20px; line-height:1.45; }
+  .card { background:var(--card); border:1px solid #e3e8e4; border-radius:14px; padding:18px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  input, select { padding:9px 10px; border:1px solid #d4dcd6; border-radius:8px; font-size:15px; background:#fff; }
+  input[type=text] { width:170px; }
+  button { padding:10px 16px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-size:15px; cursor:pointer; }
+  button:hover { background:var(--accent-dk); }
+  button.ghost { background:#eef1ee; color:var(--ink); }
+  .banner { background:#f6ecd2; color:#8a6a14; border-radius:10px; padding:10px 14px; font-size:14px; margin-bottom:14px; }
+  .item { display:flex; justify-content:space-between; gap:10px; padding:12px 0; border-top:1px solid #eef1ee; }
+  .item:first-of-type { border-top:0; }
+  .item h3 { margin:0 0 3px; font-size:16px; }
+  .meta { color:var(--muted); font-size:13px; line-height:1.5; }
+  .right { text-align:right; min-width:130px; }
+  .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; margin-bottom:5px; }
+  .pill.ok { background:#e2f0e6; color:#2f6f45; }
+  .pill.renew { background:#f6ecd2; color:#8a6a14; }
+  .pill.expired { background:#f6e0dd; color:#8f3a33; }
+  .days { font-size:15px; font-weight:600; }
+  .rm { font-size:12px; color:var(--muted); background:none; padding:2px 6px; }
+  .rm:hover { color:#8f3a33; text-decoration:underline; }
+  .empty { color:var(--muted); text-align:center; padding:14px 0 4px; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>RenewCue</h1>
+  <p class="tag">The passport that's "valid until 2027" is useless for next June's trip if the country wants 6 months of validity. RenewCue tracks every document with the lead time its renewal actually takes, and flags "renew now" while there's still time.</p>
+
+  <div class="card">
+    <div class="row">
+      <div><label for="name">Document</label><input type="text" id="name" placeholder="My passport"></div>
+      <div><label for="type">Type</label>
+        <select id="type">
+          <option>passport</option><option>visa</option><option>driver's license</option>
+          <option>id card</option><option>car registration</option><option>car insurance</option>
+          <option>health insurance</option><option>credit card</option>
+          <option>professional license</option><option>custom</option>
+        </select></div>
+      <div><label for="expiry">Expires</label><input type="date" id="expiry"></div>
+      <button id="addBtn">Add</button>
+    </div>
+  </div>
+
+  <div class="banner hidden" id="banner"></div>
+
+  <div class="card">
+    <div class="empty" id="emptyMsg">Nothing tracked. Start with your passport - it's the one that bites people.</div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script>
+(function(){
+  var E = RenewCueEngine;
+  var docs = [];
+  try { docs = JSON.parse(localStorage.getItem('renewcue') || '[]'); } catch(e){}
+  var $ = function(id){ return document.getElementById(id); };
+  function todayISO(){
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function save(){ localStorage.setItem('renewcue', JSON.stringify(docs)); }
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function render(){
+    var t = todayISO();
+    var sorted = E.sortDocs(docs, t);
+    $('emptyMsg').style.display = docs.length ? 'none' : 'block';
+    var n = E.actionCount(docs, t);
+    if (n > 0){
+      $('banner').classList.remove('hidden');
+      $('banner').textContent = n === 1 ? '1 document needs action - renew it before the window closes.' : n + ' documents need action.';
+    } else $('banner').classList.add('hidden');
+    var html = '';
+    for (var i = 0; i < sorted.length; i++){
+      var doc = sorted[i];
+      var st = E.status(t, doc.expiry, doc.type);
+      var pillText = st === 'ok' ? 'ok' : st === 'renew' ? 'renew now' : 'expired';
+      html += '<div class="item">'
+        + '<div><h3>' + esc(doc.name) + '</h3>'
+        + '<div class="meta">' + esc(doc.type) + ' - expires ' + E.fmtISO(doc.expiry)
+        + ' - start renewal by ' + E.fmtISO(E.renewByISO(doc.expiry, doc.type)) + '</div></div>'
+        + '<div class="right"><span class="pill ' + st + '">' + pillText + '</span>'
+        + '<div class="days">' + E.statusLabel(t, doc.expiry, doc.type) + '</div>'
+        + '<button class="rm" data-idx="' + docs.indexOf(doc) + '">remove</button></div></div>';
+    }
+    $('list').innerHTML = html;
+    var rms = document.querySelectorAll('.rm');
+    for (var j = 0; j < rms.length; j++){
+      rms[j].addEventListener('click', function(){
+        docs.splice(parseInt(this.getAttribute('data-idx'), 10), 1);
+        save(); render();
+      });
+    }
+  }
+
+  $('addBtn').addEventListener('click', function(){
+    var name = $('name').value.trim();
+    var expiry = $('expiry').value;
+    if (!name || !expiry) return;
+    docs.push({ name: name, type: $('type').value, expiry: expiry });
+    $('name').value = ''; $('expiry').value = '';
+    save(); render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
